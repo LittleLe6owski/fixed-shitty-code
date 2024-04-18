@@ -95,7 +95,7 @@ func main() {
 
 	group.Go(
 		func() error {
-			for i := 0; i < 50; i++ { // создадим 50 задач
+			for {
 				select {
 				case doneTask, ok := <-doneTaskChan:
 					if !ok {
@@ -111,7 +111,6 @@ func main() {
 					return ctx.Err()
 				}
 			}
-			return nil
 		},
 	)
 
