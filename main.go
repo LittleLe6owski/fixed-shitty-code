@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"golang.org/x/sync/errgroup"
 	"sync"
@@ -74,43 +73,34 @@ func main() {
 	for i := 0; i < sortWorkerCount; i++ {
 		group.Go(
 			func() error {
-				for {
-					select {
-					case params, ok := <-taskChan:
-						if !ok {
-							return errors.New("task channel closed")
-						}
-						if sortedParams, isDone := sortTaskWorker(params); isDone {
-							doneTaskChan <- sortedParams
-						} else {
-							undoneTaskChan <- sortedParams.err
-						}
-					case <-ctx.Done():
-						return ctx.Err()
+				for params := range taskChan {
+					if sortedParams, isDone := sortTaskWorker(params); isDone {
+						doneTaskChan <- sortedParams
+						continue
+					} else {
+						undoneTaskChan <- sortedParams.err
 					}
 				}
+				return nil
 			},
 		)
 	}
 
 	group.Go(
 		func() error {
-			for {
-				select {
-				case doneTask, ok := <-doneTaskChan:
-					if !ok {
-						return errors.New("task channel closed")
-					}
-					fmt.Printf("Task completed %d \n", doneTask.id)
-				case err, ok := <-undoneTaskChan:
-					if !ok {
-						return errors.New("task channel closed")
-					}
-					fmt.Printf("Task completed unsuccessfully error: %s \n", err.Error())
-				case <-ctx.Done():
-					return ctx.Err()
-				}
+			for doneTask := range doneTaskChan {
+				fmt.Printf("Task completed %d \n", doneTask.id)
 			}
+			return nil
+		},
+	)
+
+	group.Go(
+		func() error {
+			for err := range undoneTaskChan {
+				fmt.Printf("Task completed unsuccessfully error: %s \n", err.Error())
+			}
+			return nil
 		},
 	)
 
@@ -119,10 +109,12 @@ func main() {
 
 	go func(ctx context.Context, wg *sync.WaitGroup) {
 		defer func() {
-			ctx.Done()
+			close(doneTaskChan)
+			close(undoneTaskChan)
 			wg.Done()
 		}()
 		time.Sleep(time.Second * 2)
+		ctx.Done()
 	}(ctx, wg)
 
 	wg.Wait()
@@ -131,8 +123,6 @@ func main() {
 		fmt.Println(err)
 	}
 
-	close(doneTaskChan)
-	close(undoneTaskChan)
 }
 
 func taskCreator() taskParams {
